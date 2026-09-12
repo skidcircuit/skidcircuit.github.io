@@ -41,7 +41,7 @@
 				<div id="status" class="meta">No replay loaded.</div>
 			</div>
 			<div style="margin-top:8px">
-				<textarea id="ghost-code" placeholder="Paste exported ghost code here..."></textarea>
+				<textarea id="ghost-code" autofocus placeholder="Paste exported ghost code here..."></textarea>
 			</div>
 		</div>
 		<div class="panel">
@@ -57,6 +57,9 @@
 		}
 		const codeInput = document.getElementById('ghost-code');
 		const loadBtn = document.getElementById('load-code');
+		document.getElementById('ghost-code')?.addEventListener('keydown', (e) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); loadBtn.click(); }
+		});
 		const playBtn = document.getElementById('play-pause');
 		const openRaceBtn = document.getElementById('open-race');
 		const statusEl = document.getElementById('status');

@@ -6990,7 +6990,20 @@ async function init() {
 
 	function saveStuntStats() {
 
-		localStorage.setItem( stuntStoreKey, JSON.stringify( { bestStuntPoints } ) );
+		try {
+			localStorage.setItem( stuntStoreKey, JSON.stringify( { bestStuntPoints } ) );
+		} catch ( error ) {
+			// QuotaExceededError on full-storage devices (Chromebooks are the known
+			// case): recent-ghost keys are safe to drop and free significant space.
+			try {
+				for ( const key of Object.keys( localStorage ) ) {
+					if ( key.startsWith( 'racing-recent-ghosts' ) ) localStorage.removeItem( key );
+				}
+				localStorage.setItem( stuntStoreKey, JSON.stringify( { bestStuntPoints } ) );
+			} catch ( retryError ) {
+				console.warn( `Skipped saving stunt stats (${ retryError?.name || 'storage error' })` );
+			}
+		}
 
 	}
 
@@ -9273,7 +9286,10 @@ function completeCampaignStage() {
 	const hasSeparateFinishCell = activeCells.some( ( c ) => c[ 2 ] === 'track-finish' );
 	const shouldAutoRespawnAfterLap = hasSeparateStartCell && hasSeparateFinishCell;
 	const startCell = activeCells.find( ( c ) => c[ 2 ] === 'track-start' ) || activeCells.find( ( c ) => c[ 2 ] === 'track-start-finish' ) || null;
-	const finishCell = activeCells.find( ( c ) => c[ 2 ] === 'track-finish' ) || activeCells.find( ( c ) => c[ 2 ] === 'track-start-finish' ) || activeCells[ 0 ];
+	// No finish piece: fall back to the START cell, not an arbitrary cell —
+	// activeCells[0] is just the lowest grid coordinate and put the lap gate
+	// in a random spot on finish-less tracks.
+	const finishCell = activeCells.find( ( c ) => c[ 2 ] === 'track-finish' ) || activeCells.find( ( c ) => c[ 2 ] === 'track-start-finish' ) || activeCells.find( ( c ) => c[ 2 ] === 'track-start' ) || activeCells[ 0 ];
 	const elevatedCheckpointCells = Array.isArray( extras?.elevated )
 		? extras.elevated
 			.filter( ( c ) => Array.isArray( c ) && c[ 2 ] === 'elevated-checkpoint' )
@@ -10674,6 +10690,9 @@ function completeCampaignStage() {
 
 	function updateLapHud() {
 
+		// Live lap readout in the browser tab so the race is visible even when
+		// the tab is in the background / next to the replay watcher.
+		document.title = `Lap ${ lapNumber } · ${ formatLapTime( lapSeconds ) } — Skid Circuit`;
 		const totalCheckpoints = checkpointStates.length;
 		const passedCheckpoints = checkpointStates.reduce( ( count, checkpoint ) => count + ( checkpoint.passedThisLap ? 1 : 0 ), 0 );
 		const controlsHints = [];

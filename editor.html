@@ -5093,8 +5093,24 @@ function refreshMovingSpeedUi() {
 
 		const id = `lp-${ Math.random().toString( 36 ).slice( 2, 10 ) }`;
 		const payload = JSON.stringify( { map: encodedMap, mods: encodedMods, createdAt: Date.now() } );
-		localStorage.setItem( `racing-local-pack:${ id }`, payload );
-		return id;
+		const save = () => localStorage.setItem( `racing-local-pack:${ id }`, payload );
+		try {
+			save();
+			return id;
+		} catch ( error ) {
+			// QuotaExceededError on constrained devices: recent-ghost keys are safe
+			// to drop and free significant space — purge, retry once, then surface.
+			try {
+				for ( const key of Object.keys( localStorage ) ) {
+					if ( key.startsWith( 'racing-recent-ghosts' ) ) localStorage.removeItem( key );
+				}
+				save();
+				return id;
+			} catch ( retryError ) {
+				console.warn( `Skipped saving local pack (${ retryError?.name || 'storage error' })` );
+				throw new Error( 'Storage is full — could not save the track pack.' );
+			}
+		}
 
 	}
 
@@ -5138,7 +5154,7 @@ function refreshMovingSpeedUi() {
 
 	}
 
-	localStorage.setItem( 'racing-campaign-editor-opened', '1' );
+	safeSetItem( 'racing-campaign-editor-opened', '1' );
 
 	document.getElementById( 'btn-play' ).addEventListener( 'click', async () => {
 
@@ -5152,7 +5168,7 @@ function refreshMovingSpeedUi() {
 		try {
 
 			const result = await createPlayableTrackUrl();
-			localStorage.setItem( 'racing-campaign-editor-played', '1' );
+			safeSetItem( 'racing-campaign-editor-played', '1' );
 			window.open( result.url, '_blank' );
 			if ( result.mode === 'local-pack' ) showToast( 'Opened with local pack fallback (same browser/device only).' );
 
@@ -5179,7 +5195,7 @@ function refreshMovingSpeedUi() {
 			testUrl.searchParams.set( 'editorQuickTest', '1' );
 			testUrl.searchParams.set( 'editorReturn', window.location.href.split( '?' )[ 0 ] );
 			testUrl.searchParams.set( 'editorGhostMap', `${ await encodeCellsV3( getCellsArray() ) }|${ await encodeModsV3() }` );
-			localStorage.setItem( 'racing-campaign-editor-played', '1' );
+			safeSetItem( 'racing-campaign-editor-played', '1' );
 			window.location.href = testUrl.toString();
 			if ( result.mode === 'local-pack' ) showToast( 'Opened with local pack fallback (same browser/device only).' );
 
