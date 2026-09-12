@@ -158,7 +158,9 @@ export function runActions( actions, ctx, event ) {
   event = event || {};
   const api = ( ctx && ctx.api ) || {};
   if ( ! ctx.state ) ctx.state = { vars: {}, textvars: {}, timers: [], waits: [], elements: {} };
-  for ( const action of actions || [] ) {
+  const list = actions || [];
+  for ( let ai = 0; ai < list.length; ai ++ ) {
+    const action = list[ ai ];
     if ( ! action || ! action.type ) continue;
     const value = resolveValue( action.value, ctx, event );
     switch ( action.type ) {
@@ -218,10 +220,16 @@ export function runActions( actions, ctx, event ) {
       case 'set_pixel_ratio': if ( typeof api.setRendererPixelRatio === 'function' ) api.setRendererPixelRatio( Number( value ) || 1 ); break;
       case 'set_shadows': if ( typeof api.setShadowEnabled === 'function' ) api.setShadowEnabled( Number( value ) || 0 ); break;
       case 'start_timer': ctx.state.timers.push( { remaining: Math.max( 0, Number( value ) || 0 ), id: action.id || 'timer1' } ); break;
-      case 'wait': ctx.state.waits.push( { remaining: Math.max( 0, Number( value ) || 0 ), paused: true, actions: null } ); break;
-      case 'random_delay': { const mn = Number( resolveValue( action.min, ctx, event ) ) || 0; const mx = Number( resolveValue( action.max, ctx, event ) ) || mn; ctx.state.waits.push( { remaining: Math.random() * Math.abs( mx - mn ) + Math.min( mn, mx ), paused: true, actions: null } ); break; }
+      // Wait now actually WAITS: the remaining actions in this list are parked
+      // and resumed by applyFrame once the delay elapses. The old version pushed
+      // a wait record nothing ever processed — a 100% no-op.
+      case 'wait': ctx.state.waits.push( { remaining: Math.max( 0, Number( value ) || 0 ), rest: list.slice( ai + 1 ) } ); return;
+      case 'random_delay': { const mn = Number( resolveValue( action.min, ctx, event ) ) || 0; const mx = Number( resolveValue( action.max, ctx, event ) ) || mn; ctx.state.waits.push( { remaining: Math.random() * Math.abs( mx - mn ) + Math.min( mn, mx ), rest: list.slice( ai + 1 ) } ); return; }
       case 'repeat': { const times = Math.max( 0, Math.min( 100, Math.floor( Number( resolveValue( action.times, ctx, event ) ) || 0 ) ) ); for ( let i = 0; i < times; i++ ) runActions( action.body || [], ctx, event ); break; }
-      case 'loop_forever': { for ( let i = 0; i < 60; i++ ) runActions( action.body || [], ctx, event ); break; }
+      // "Loop forever" now loops forever — the body runs every frame from
+      // applyFrame. The old version ran it 60 times instantly, once, which is
+      // neither a loop nor forever.
+      case 'loop_forever': { if ( ! Array.isArray( ctx.state.forever ) ) ctx.state.forever = []; if ( ctx.state.forever.length < 64 ) ctx.state.forever.push( action.body || [] ); break; }
       case 'var_set': ctx.state.vars[ action.name ] = Number( value ) || 0; break;
       case 'var_add': ctx.state.vars[ action.name ] = ( Number( ctx.state.vars[ action.name ] ) || 0 ) + ( Number( value ) || 0 ); break;
       case 'textvar_set': ctx.state.textvars[ action.name ] = String( value ?? '' ); break;
@@ -294,7 +302,9 @@ export function createRuntime( id, SPEC ) {
       runActions( SPEC.onStart, this.ctx, { type: 'start' } );
     },
     applyFrame( { controls, vehicle, world, dt, now } ) {
-      const ctx = this.ctx || { vehicle, world, controls };
+      // Ignore frames that arrive between boot and (microtask-deferred) init.
+      if ( ! this.ctx ) return null;
+      const ctx = this.ctx;
       ctx.state = this.state;
       const st = ( typeof ctx.getState === 'function' ) ? ctx.getState() : {};
       const ev = { type: 'tick', dt, now, airborne: Boolean( st.airborne ), lapTime: st.lapTime, raceTime: st.raceTime };
@@ -310,6 +320,8 @@ export function createRuntime( id, SPEC ) {
       const airborne = Boolean( ev.airborne ); if ( airborne && ! this.wasAirborne ) runActions( SPEC.onAir, ctx, { type: 'air', dt, now } ); if ( ! airborne && this.wasAirborne ) runActions( SPEC.onGround, ctx, { type: 'ground', dt, now } ); this.wasAirborne = airborne;
       const drifting = Boolean( st.driftIntensity && st.driftIntensity > 0.6 ); if ( drifting && ! this.wasDrifting ) runActions( SPEC.onDrift, ctx, { type: 'drift', dt, now } ); this.wasDrifting = drifting;
       if ( Array.isArray( this.state.timers ) ) { for ( const t of this.state.timers ) t.remaining -= dt; const done = this.state.timers.filter( ( t ) => t.remaining <= 0 ); this.state.timers = this.state.timers.filter( ( t ) => t.remaining > 0 ); for ( const t of done ) runActions( ( SPEC.onTimerDone && SPEC.onTimerDone[ t.id ] ) || [], ctx, { type: 'timer_done', id: t.id, now } ); }
+      if ( Array.isArray( this.state.waits ) && this.state.waits.length ) { for ( const w of this.state.waits ) w.remaining -= dt; const due = this.state.waits.filter( ( w ) => w.remaining <= 0 ); this.state.waits = this.state.waits.filter( ( w ) => w.remaining > 0 ); for ( const w of due ) runActions( w.rest || [], ctx, { type: 'timer_done', id: 'wait', dt, now } ); }
+      for ( const body of ( this.state.forever || [] ) ) runActions( body, ctx, ev );
       return null;
     },
     onCheckpoint( event ) { runActions( SPEC.onCheckpoint, this.ctx, { type: 'checkpoint', ...( event || {} ) } ); },

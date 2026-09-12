@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { createWorldSettings, createWorld, addBroadphaseLayer, addObjectLayer, enableCollision, registerAll, updateWorld, rigidBody, box, triangleMesh, MotionType, castRay, createAnyCastRayCollector, createDefaultCastRaySettings, CastRayStatus, filter as ccLayerFilter } from 'crashcat';
-import { Vehicle } from './Vehicle.js';
+import { Vehicle } from './Vehicle.js?v=1000223';
 import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
 import { buildTrack, decodeCells, decodeCellsAny, decodeV3Json, computeSpawnPosition, computeTrackBounds, computePoolPresetWaterCells, prerenderWaterRefraction, updateWaterQuality, setWaterUnderwaterCameraState, TRACK_CELLS, ORIENT_DEG, CELL_RAW, GRID_SCALE } from './Track.js?v=1000222';
@@ -14,7 +14,7 @@ import { encodeGhostBinary, decodeGhostBinary, encodeGhostCode, decodeGhostCode 
 import { DeterministicPlaybackController } from './tas-core.js';
 import { AdvancementEvents, AdvancementManager, ADVANCEMENTS } from './Advancements.js';
 import { HudExtras } from './HudExtras.js';
-import { createRuntime as _createModRuntime } from './mod-runtime.js';
+import { createRuntime as _createModRuntime } from './mod-runtime.js?v=1000223';
 import Peer from 'https://esm.sh/peerjs@1.5.5?bundle';
 import { canJoinMap, createHostCode, readFirebaseConfig } from './FirebaseMultiplayer.js';
 import { normalizeFirebaseVoteDoc, tallyFirebaseVotes, countFreshRoomPlayers } from './multiplayer-firebase-vote.js';
@@ -6128,11 +6128,13 @@ async function init() {
 			forceThrottle: ( secs = 0.4 ) => { customModForceThrottleUntil = Math.max( customModForceThrottleUntil, raceClockSeconds + THREE.MathUtils.clamp( Number( secs ) || 0.4, 0.05, 8 ) ); },
 			disableSteering: ( secs = 0.5 ) => { customModNoSteerUntil = Math.max( customModNoSteerUntil, raceClockSeconds + THREE.MathUtils.clamp( Number( secs ) || 0.5, 0.05, 8 ) ); },
 			setFogStrength: ( value = 1 ) => { customModFogStrength = THREE.MathUtils.clamp( Number( value ) || 1, 0, 2 ); },
+			// Boot-safe: mods run onStart before the garage/economy HUD exists —
+			// the coin state must still update (and must never kill the rest of
+			// a mod's onStart when the HUD write isn't ready yet).
 			addCoins: ( amount = 0 ) => {
 				if ( isSplitScreen ) return;
 				coins = Math.max( 0, Math.floor( coins + ( Number( amount ) || 0 ) ) );
-				saveEconomy();
-				updateEconomyHud();
+				try { saveEconomy(); updateEconomyHud(); } catch { /* HUD not ready (mod onStart at boot) */ }
 			},
 			cameraShake: ( intensity = 1 ) => {
 				customModShakeIntensity = Math.max( customModShakeIntensity, Math.max( 0, Number( intensity ) || 0 ) );
@@ -6192,17 +6194,15 @@ async function init() {
 				try { customModParticleColor = new THREE.Color( String( hex ) || '#ff4b1f' ); } catch { /* ignore invalid color */ }
 			},
 			spawnParticleBurst: ( secs = 0.45 ) => { customModParticleBurstSeconds = Math.max( customModParticleBurstSeconds, THREE.MathUtils.clamp( Number( secs ) || 0.45, 0.1, 4 ) ); },
-			// Spin is a PHYSICAL yaw spin now — the old version only nudged the
-			// visual container yaw, which the per-frame body update overwrote
-			// instantly, so the block visibly did nothing.
+			// Sustained car spin: the drive model owns the car's yaw
+			// (container.rotateY(angularSpeed * dt) every frame), so a one-shot
+			// angular-velocity or rotation write was gone within a frame. The
+			// rate persists in __modSpin and Vehicle.update applies it alongside
+			// steering — set 0 to stop spinning.
 			setVehicleSpin: ( rad = 0 ) => {
-				const value = THREE.MathUtils.clamp( Number( rad ) || 0, -Math.PI * 4, Math.PI * 4 );
-				if ( vehicle?.rigidBody ) {
-					const cur = vehicle.rigidBody.motionProperties?.angularVelocity || [ 0, 0, 0 ];
-					rigidBody.setAngularVelocity( world, vehicle.rigidBody, [ cur[ 0 ], value, cur[ 2 ] ] );
-				} else if ( vehicle?.container ) {
-					vehicle.container.rotation.y = value;
-				}
+				if ( ! vehicle ) return;
+				vehicle.__modSpin = THREE.MathUtils.clamp( Number( rad ) || 0, -Math.PI * 4, Math.PI * 4 );
+				if ( vehicle.container ) vehicle.container.rotateY( vehicle.__modSpin * 0.05 );
 			},
 			applyImpulse: ( x = 0, y = 0, z = 0 ) => {
 				if ( ! vehicle?.rigidBody ) return;
@@ -6244,7 +6244,22 @@ async function init() {
 					effectMessageTimeout = window.setTimeout( () => { if ( effectMessage ) effectMessage.classList.remove( 'show' ); }, 2000 );
 				}
 			},
-			addStuntPoints: ( amount = 0, reason = '' ) => { addStuntPoints( THREE.MathUtils.clamp( Number( amount ) || 0, 0, 1000 ), String( reason || '' ).slice( 0, 40 ) ); },
+			// Works in ANY game mode — the in-game addStuntPoints is
+			// stunt-mode-only, which made this block a silent no-op in
+			// normal races.
+			addStuntPoints: ( amount = 0, reason = '' ) => {
+				try {
+					const amt = THREE.MathUtils.clamp( Number( amount ) || 0, 0, 1000 );
+					if ( amt > 0 ) {
+						stuntPoints += amt;
+						if ( stuntPoints > bestStuntPoints ) {
+							bestStuntPoints = stuntPoints;
+							try { saveStuntStats(); } catch { /* not ready at boot */ }
+							try { updateGarageUi(); } catch { /* not ready at boot */ }
+						}
+					}
+				} catch { /* state not ready (mod onStart at boot) */ }
+			},
 			setFpsCounter: ( visible = 1 ) => { if ( fpsHud ) fpsHud.style.display = Boolean( visible ) ? 'block' : 'none'; },
 			setSkyVibrance: ( value = 0.2 ) => { skyUniforms.vibrance.value = THREE.MathUtils.clamp( Number( value ) || 0, 0, 1 ); },
 			setRendererPixelRatio: ( value = 1 ) => { renderer.setPixelRatio( THREE.MathUtils.clamp( Number( value ) || 1, 0.25, 2 ) ); },
@@ -6319,7 +6334,19 @@ async function init() {
 			scopedContext.storage = createModStorage( modId );
 			runtime._modId = modId;
 			runtime._scopedContext = scopedContext;
-			runtime.init( scopedContext );
+			// Defer init until the synchronous boot has finished: this loop ran
+			// before game state (coins etc.) was declared, so any onStart action
+			// touching it died on a TDZ ReferenceError and killed the rest of
+			// the mod's startup (e.g. add_coins as the FIRST action = whole
+			// onStart dead). A microtask fires right after init() completes —
+			// still before the first rendered frame.
+			queueMicrotask( () => {
+				try {
+					runtime.init( scopedContext );
+				} catch ( error ) {
+					console.warn( `Mod init failed: ${ modId }`, error );
+				}
+			} );
 			// Make the mod's activation unmistakable: custom-* mods (Blockly custom mods)
 			// announce themselves so the player knows the installed mod is live and will
 			// affect gameplay (and that leaderboard is disabled while it runs).

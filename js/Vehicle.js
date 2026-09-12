@@ -230,6 +230,9 @@ export class Vehicle {
 
 		this.container.rotateY( this.angularSpeed * dt );
 
+		// Custom-mod "spin car": sustained yaw rate alongside steering.
+		if ( Number.isFinite( this.__modSpin ) ) this.container.rotateY( this.__modSpin * dt );
+
 		_tmpVec.set( 0, 1, 0 ).applyQuaternion( this.container.quaternion );
 
 		if ( _tmpVec.y > 0.5 ) {
