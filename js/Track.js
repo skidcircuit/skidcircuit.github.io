@@ -2001,6 +2001,11 @@ export async function decodeCellsAny( str ) {
 
 export function computeSpawnPosition( cells ) {
 
+	// Null/undefined cells (e.g. TAS viewer booted with no track URL) used to
+	// throw before every caller could guard. Empty arrays already fall through
+	// to this same default, so behavior is unchanged for them.
+	if ( ! Array.isArray( cells ) || cells.length === 0 ) return { position: [ 3.5, 0.5, 5 ], angle: 0 };
+
 	let cell = cells[ 0 ];
 
 	for ( const c of cells ) {
