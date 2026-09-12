@@ -6062,7 +6062,10 @@ async function init() {
 			stuntPoints,
 			stuntCombo,
 			driftIntensity: vehicle?.driftIntensity || 0,
-			linearSpeed: Math.abs( Number( vehicle?.linearSpeed ) || 0 ),
+			// PHYSICAL speed (world u/s — the same base the HUD speedometer reads),
+			// not the drive model's internal wheel-speed scalar (which topped out
+			// at ~1.8 and made every speed input meaningless to players).
+			linearSpeed: ( () => { const lv = vehicle?.rigidBody?.motionProperties?.linearVelocity; return lv ? Math.hypot( lv[ 0 ], lv[ 1 ], lv[ 2 ] ) : Math.abs( Number( vehicle?.linearSpeed ) || 0 ); } )(),
 			angularSpeed: Number( vehicle?.angularSpeed ) || 0,
 			gameMode,
 			isSplitScreen,
@@ -6118,9 +6121,9 @@ async function init() {
 			},
 			resetCar: () => vehicle.resetToSpawn(),
 			setTimeScale: ( scale = 1 ) => { customModTimeScale = THREE.MathUtils.clamp( Number( scale ) || 1, 0.1, 4 ); },
-			setAccelMultiplier: ( value = 1 ) => { vehicle.accelMultiplier = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 4 ); },
-			setDriveMultiplier: ( value = 1 ) => { vehicle.driveMultiplier = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 4 ); },
-			setGripMultiplier: ( value = 1 ) => { vehicle.gripMultiplier = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 4 ); },
+			setAccelMultiplier: ( value = 1 ) => { vehicle.__modAccel = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 4 ); vehicle.accelMultiplier = ( vehicle.accelMultiplier || 1 ) * vehicle.__modAccel; },
+			setDriveMultiplier: ( value = 1 ) => { vehicle.__modDrive = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 4 ); vehicle.driveMultiplier = Math.min( 4, ( vehicle.driveMultiplier || 1 ) * vehicle.__modDrive ); },
+			setGripMultiplier: ( value = 1 ) => { vehicle.__modGrip = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 4 ); vehicle.gripMultiplier = ( vehicle.gripMultiplier || 1 ) * vehicle.__modGrip; },
 			forceBrake: ( secs = 0.4 ) => { customModForceBrakeUntil = Math.max( customModForceBrakeUntil, raceClockSeconds + THREE.MathUtils.clamp( Number( secs ) || 0.4, 0.05, 8 ) ); },
 			forceThrottle: ( secs = 0.4 ) => { customModForceThrottleUntil = Math.max( customModForceThrottleUntil, raceClockSeconds + THREE.MathUtils.clamp( Number( secs ) || 0.4, 0.05, 8 ) ); },
 			disableSteering: ( secs = 0.5 ) => { customModNoSteerUntil = Math.max( customModNoSteerUntil, raceClockSeconds + THREE.MathUtils.clamp( Number( secs ) || 0.5, 0.05, 8 ) ); },
@@ -6137,15 +6140,21 @@ async function init() {
 			},
 			// --- Extended custom-mod API (added for expanded Custom Mods Lab) ---
 			// All numeric inputs are clamped to safe, non-exploitable ranges.
-			setTopSpeed: ( value = 1 ) => { vehicle.topSpeed = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, MAX_EFFECTIVE_TOP_SPEED ); },
+			// Mod-set multipliers (__modX) are folded into the per-frame recompute in
+			// applySurfaceGrip/applyVehicleScaleFromPad — writing the derived field
+			// directly (vehicle.topSpeed etc.) was stomped back within one frame,
+			// which made these blocks literal no-ops.
+			setTopSpeed: ( value = 1 ) => { vehicle.__modSpeed = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 5 ); vehicle.topSpeed = ( Number.isFinite( vehicle.baseTopSpeed ) ? vehicle.baseTopSpeed : vehicle.topSpeed ) * vehicle.__modSpeed; },
 			setAccelRate: ( value = 6 ) => { vehicle.accelRate = THREE.MathUtils.clamp( Number( value ) || 6, 0.5, 30 ); },
 			setBrakeRate: ( value = 8 ) => { vehicle.brakeRate = THREE.MathUtils.clamp( Number( value ) || 8, 1, 40 ); },
 			setDriveForce: ( value = 100 ) => { vehicle.driveForce = THREE.MathUtils.clamp( Number( value ) || 100, 10, 400 ); },
-			setDragMultiplier: ( value = 1 ) => { vehicle.dragMultiplier = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 5 ); },
+			setDragMultiplier: ( value = 1 ) => { vehicle.__modDrag = THREE.MathUtils.clamp( Number( value ) || 1, 0.1, 5 ); vehicle.dragMultiplier = ( vehicle.dragMultiplier || 1 ) * vehicle.__modDrag; },
 			setReverseAccelRate: ( value = 2 ) => { vehicle.reverseAccelRate = THREE.MathUtils.clamp( Number( value ) || 2, 0.5, 20 ); },
 			setVehicleScale: ( value = 1 ) => {
 				const s = THREE.MathUtils.clamp( Number( value ) || 1, 0.25, 3 );
-				if ( vehicle?.container ) vehicle.container.scale.setScalar( s );
+				if ( ! vehicle ) return;
+				vehicle.__modScale = s;
+				if ( vehicle.container ) vehicle.container.scale.setScalar( s );
 			},
 			setVehicleVisible: ( value = 1 ) => { if ( vehicle?.container ) vehicle.container.visible = Boolean( value ); },
 			setEngineVolume: ( value = 1 ) => {
@@ -6183,9 +6192,17 @@ async function init() {
 				try { customModParticleColor = new THREE.Color( String( hex ) || '#ff4b1f' ); } catch { /* ignore invalid color */ }
 			},
 			spawnParticleBurst: ( secs = 0.45 ) => { customModParticleBurstSeconds = Math.max( customModParticleBurstSeconds, THREE.MathUtils.clamp( Number( secs ) || 0.45, 0.1, 4 ) ); },
+			// Spin is a PHYSICAL yaw spin now — the old version only nudged the
+			// visual container yaw, which the per-frame body update overwrote
+			// instantly, so the block visibly did nothing.
 			setVehicleSpin: ( rad = 0 ) => {
-				if ( ! vehicle?.container ) return;
-				vehicle.container.rotation.y = THREE.MathUtils.clamp( Number( rad ) || 0, -Math.PI * 4, Math.PI * 4 );
+				const value = THREE.MathUtils.clamp( Number( rad ) || 0, -Math.PI * 4, Math.PI * 4 );
+				if ( vehicle?.rigidBody ) {
+					const cur = vehicle.rigidBody.motionProperties?.angularVelocity || [ 0, 0, 0 ];
+					rigidBody.setAngularVelocity( world, vehicle.rigidBody, [ cur[ 0 ], value, cur[ 2 ] ] );
+				} else if ( vehicle?.container ) {
+					vehicle.container.rotation.y = value;
+				}
 			},
 			applyImpulse: ( x = 0, y = 0, z = 0 ) => {
 				if ( ! vehicle?.rigidBody ) return;
@@ -6235,7 +6252,7 @@ async function init() {
 			flashScreen: ( hex = '#ffffff' ) => {
 				try { customModFlashColor = new THREE.Color( String( hex ) || '#ffffff' ); customModFlashUntil = raceClockSeconds + 0.3; } catch { /* ignore */ }
 			},
-			setDriftIntensity: ( value = 0 ) => { vehicle.driftIntensity = THREE.MathUtils.clamp( Number( value ) || 0, 0, 2 ); },
+			setDriftIntensity: ( value = 0 ) => { vehicle.__modDrift = THREE.MathUtils.clamp( Number( value ) || 0, 0, 2 ); },
 			setSkyPalette: ( preset = 'clear' ) => {
 				const p = WEATHER_PRESETS[ preset ] ? preset : 'clear';
 				applySkyPalette( p );
@@ -10207,7 +10224,10 @@ function completeCampaignStage() {
 	function applyVehicleScaleFromPad( targetVehicle, effect, targetHitboxMesh = null ) {
 
 		if ( ! targetVehicle?.container ) return;
-		const nextScale = Number.isFinite( effect?.scale ) ? THREE.MathUtils.clamp( effect.scale, 0.35, 2.5 ) : 1;
+		// No pad effect active: settle at the mod-set scale (default 1) instead of
+		// hard-resetting to 1, which stomped the custom-mod "set car scale" block.
+		const modBase = THREE.MathUtils.clamp( targetVehicle.__modScale ?? 1, 0.25, 3 );
+		const nextScale = Number.isFinite( effect?.scale ) ? THREE.MathUtils.clamp( effect.scale, 0.35, 2.5 ) : modBase;
 		const prevScale = Number.isFinite( targetVehicle.__padScale ) ? targetVehicle.__padScale : 1;
 		targetVehicle.container.scale.setScalar( nextScale );
 		targetVehicle.__padScale = nextScale;
@@ -10359,9 +10379,9 @@ function completeCampaignStage() {
 		const padDrag = Number.isFinite( padEffect?.drag ) ? padEffect.drag : 1.0;
 		const padAccel = Number.isFinite( padEffect?.accel ) ? padEffect.accel : 1.0;
 		const padDrive = Number.isFinite( padEffect?.drive ) ? padEffect.drive : 1.0;
-		targetVehicle.gripMultiplier = ( effect ? effect.grip : 1.0 ) * gripPack * padGrip;
+		targetVehicle.gripMultiplier = ( effect ? effect.grip : 1.0 ) * gripPack * padGrip * ( targetVehicle.__modGrip ?? 1 );
 		if ( hacksInstalled && hacksState.enabled ) targetVehicle.gripMultiplier *= hacksState.roadGrip;
-		targetVehicle.dragMultiplier = ( effect ? effect.drag : 1.0 ) * padDrag;
+		targetVehicle.dragMultiplier = ( effect ? effect.drag : 1.0 ) * padDrag * ( targetVehicle.__modDrag ?? 1 );
 		if ( hacksInstalled && hacksState.enabled && hacksState.lowFriction ) targetVehicle.dragMultiplier *= 0.35;
 		const speedCapScale = Number.isFinite( padEffect?.topSpeed ) ? padEffect.topSpeed : 1.0;
 		// Pad effects raise the car's actual top speed (stacked pads used to only
@@ -10379,9 +10399,9 @@ function completeCampaignStage() {
 		const PAD_SPEED_FACTOR_CAP = 10;
 		const PAD_DRIVE_CAP = 4;
 		if ( ! Number.isFinite( targetVehicle.baseTopSpeed ) ) targetVehicle.baseTopSpeed = targetVehicle.topSpeed;
-		targetVehicle.topSpeed = targetVehicle.baseTopSpeed * Math.min( PAD_SPEED_FACTOR_CAP, speedCapScale );
-		targetVehicle.accelMultiplier = ( effect ? effect.accel : 1.0 ) * accelPack * padAccel;
-		targetVehicle.driveMultiplier = Math.min( PAD_DRIVE_CAP, ( effect ? effect.drive : 1.0 ) * drivePack * padDrive );
+		targetVehicle.topSpeed = targetVehicle.baseTopSpeed * Math.min( PAD_SPEED_FACTOR_CAP, speedCapScale ) * ( targetVehicle.__modSpeed ?? 1 );
+		targetVehicle.accelMultiplier = ( effect ? effect.accel : 1.0 ) * accelPack * padAccel * ( targetVehicle.__modAccel ?? 1 );
+		targetVehicle.driveMultiplier = Math.min( PAD_DRIVE_CAP, ( effect ? effect.drive : 1.0 ) * drivePack * padDrive * ( targetVehicle.__modDrive ?? 1 ) );
 
 	}
 

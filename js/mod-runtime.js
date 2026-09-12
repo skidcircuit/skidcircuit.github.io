@@ -46,8 +46,8 @@ export function resolveValue( value, ctx, event ) {
         case 'isPaused': return Boolean( s.paused );
         case 'fps': return Number( s.fps ?? 0 ) || 0;
         case 'dt': return Number( event.dt ?? 0 ) || 0;
-        case 'speedKmh': return Math.abs( Number( s.linearSpeed ) || 0 ) * 3.6;
-        case 'speedMph': return Math.abs( Number( s.linearSpeed ) || 0 ) * 2.23694;
+        case 'speedKmh': return Math.abs( Number( s.linearSpeed ) || 0 ) * 4.805; // u/s -> km/h, matches the HUD speedometer (mph factor 2.985)
+        case 'speedMph': return Math.abs( Number( s.linearSpeed ) || 0 ) * 2.985; // matches the HUD speedometer exactly
         case 'heading': return ( ( Number( s.heading ) || 0 ) );
         case 'velocityX': return Number( s.velocityX ?? 0 ) || 0;
         case 'velocityY': return Number( s.velocityY ?? 0 ) || 0;

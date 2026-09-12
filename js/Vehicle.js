@@ -341,7 +341,10 @@ export class Vehicle {
 		const throttleLoad = Math.abs( this.inputZ ) > 0.45 ? 0.12 : 0;
 		const bodyRollSlip = this.bodyNode ? Math.max( 0, Math.abs( this.bodyNode.rotation.z ) - 0.08 ) * 1.4 : 0;
 		const targetDriftIntensity = Math.max( 0, lateralSlip * 1.35 + steeringLoad * 0.28 + throttleLoad + bodyRollSlip - 0.28 );
-		this.driftIntensity = THREE.MathUtils.lerp( this.driftIntensity, targetDriftIntensity, Math.min( 1, dt * 8 ) );
+		// Custom-mod "set drift" persists: mods store __modDrift and it overrides
+		// the computed target so the value isn't lerped away next frame.
+		const driftTarget = Number.isFinite( this.__modDrift ) ? this.__modDrift : targetDriftIntensity;
+		this.driftIntensity = THREE.MathUtils.lerp( this.driftIntensity, driftTarget, Math.min( 1, dt * 8 ) );
 
 	}
 
