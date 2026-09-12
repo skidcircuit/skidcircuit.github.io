@@ -9505,17 +9505,6 @@ function completeCampaignStage() {
 
 	}
 
-	// The gate's local frame below is the TRANSPOSED cell rotation, so the car's
-	// forward along localZ flips with orientation: +localZ for angles 0/180
-	// (orients 0/10), -localZ for 90/270 (orients 16/22). Gates are square
-	// (|localX| and |localZ| share one halfExtent), which is why the old
-	// direction-agnostic crossing check worked on every orientation — but it
-	// also counted REVERSE crossings as lap completions.
-	function gateForwardZSign( gate ) {
-
-		return Math.cos( 2 * ( gate.angle || 0 ) ) >= 0 ? 1 : -1;
-
-	}
 	const finishData = makeGateData( finishCell );
 	const startGateData = makeGateData( startCell || finishCell );
 	const checkpointStates = checkpointCells.map( ( cell ) => ( {
@@ -13470,8 +13459,7 @@ function completeCampaignStage() {
 				// so backing across a gate can never count.
 				const z0 = checkpoint.lastLocalZ;
 				const z1 = localZ;
-				const forwardZ = gateForwardZSign( checkpoint );
-				const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
+				const crossedPlane = ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 );
 
 				if ( crossedPlane ) {
 
@@ -13519,8 +13507,7 @@ function completeCampaignStage() {
 
 					const z0 = checkpoint.lastLocalZ;
 					const z1 = localZ;
-					const forwardZ = gateForwardZSign( checkpoint );
-					const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
+					const crossedPlane = ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 );
 
 					if ( crossedPlane ) {
 
@@ -13570,8 +13557,7 @@ function completeCampaignStage() {
 
 				const z0 = lastLocalZ;
 				const z1 = localZ;
-				const forwardZ = gateForwardZSign( finishData );
-				const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
+				const crossedPlane = ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 );
 
 				if ( crossedPlane ) {
 
@@ -13788,8 +13774,7 @@ function completeCampaignStage() {
 
 				const z0 = lastLocalZ2;
 				const z1 = localZ;
-				const forwardZ = gateForwardZSign( finishData );
-				const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
+				const crossedPlane = ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 );
 				if ( crossedPlane ) {
 
 					const t = z0 / ( z0 - z1 );
