@@ -73,11 +73,18 @@ function ensureMenuMusic() {
 	return menuMusic;
 }
 
+// Guards against a stale async source swap: two overlapping setSource()
+// calls (e.g. error fallback firing while the first cache/fetch is still in
+// flight) used to let the SLOWER response win and silently replace the
+// working source with a dead one — menu music then stayed silent even though
+// every load looked healthy. Only the most recent request may apply its URL.
+let sourceRequestId = 0;
 function setSource( src ) {
 	sourceReady = false;
+	const request = ++ sourceRequestId;
 	const audio = ensureMenuMusic();
 	getCachedAudioUrl( src ).then( url => {
-		if ( ! audio ) return;
+		if ( ! audio || request !== sourceRequestId ) return;
 		audio.pause();
 		audio.setAttribute( 'src', url );
 		audio.load();

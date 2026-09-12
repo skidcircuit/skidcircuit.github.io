@@ -13237,7 +13237,12 @@ function completeCampaignStage() {
 
 		dirLight.position.set(
 			vehicle.spherePos.x + 11.4,
-			15,
+			// Height-tracking: keep the sun a constant +15 above the sphere so the
+			// light vector is identical on elevated decks (+3.75) and in pool bowls
+			// (-2.5) — a fixed Y rotated the vector as the car climbed/descended,
+			// stretching shadows and drifting their intensity. The offset matches
+			// the historical ground-level light (0 + 15 = 15).
+			vehicle.spherePos.y + 15,
 			vehicle.spherePos.z - 5.3
 		);
 
