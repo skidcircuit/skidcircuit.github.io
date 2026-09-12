@@ -300,7 +300,11 @@ export class Vehicle {
 
 		if ( this.spherePos.y < - 10 ) {
 
-			this.resetToSpawn();
+			// Host (main.js) wires onOutOfBounds to its full respawn (lap state,
+			// obstacles, camera). Without the callback (editor test drive) fall
+			// back to a plain physics-only reset.
+			if ( this.onOutOfBounds ) this.onOutOfBounds();
+			else this.resetToSpawn();
 
 		}
 

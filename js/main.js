@@ -5036,6 +5036,8 @@ async function init() {
 	// ── HUD Extras: speedometer, minimap, shortcuts overlay ──
 	let hudExtras = null;
 	vehicle.setSpawn( spawn ? spawn.position : [ 3.5, 0.5, 5 ], spawn ? spawn.angle : 0 );
+	// Full respawn (lap state, obstacles, camera) when falling out of the world
+	vehicle.onOutOfBounds = respawnVehicle;
 	vehicle.setPerformance( CAR_STATS[ player1CarKey ].perf );
 
 	if ( spawn ) {
@@ -5062,6 +5064,7 @@ async function init() {
 		vehicle2.rigidBody = sphereBody2;
 		vehicle2.physicsWorld = world;
 		vehicle2.setSpawn( spawnPos2, spawnAngle );
+		vehicle2.onOutOfBounds = respawnVehicle2;
 		vehicle2.setPerformance( CAR_STATS[ player2CarKey ].perf );
 		const vehicleGroup2 = vehicle2.init( models[ player2CarKey ] );
 		scene.add( vehicleGroup2 );
@@ -9502,6 +9505,17 @@ function completeCampaignStage() {
 
 	}
 
+	// The gate's local frame below is the TRANSPOSED cell rotation, so the car's
+	// forward along localZ flips with orientation: +localZ for angles 0/180
+	// (orients 0/10), -localZ for 90/270 (orients 16/22). Gates are square
+	// (|localX| and |localZ| share one halfExtent), which is why the old
+	// direction-agnostic crossing check worked on every orientation — but it
+	// also counted REVERSE crossings as lap completions.
+	function gateForwardZSign( gate ) {
+
+		return Math.cos( 2 * ( gate.angle || 0 ) ) >= 0 ? 1 : -1;
+
+	}
 	const finishData = makeGateData( finishCell );
 	const startGateData = makeGateData( startCell || finishCell );
 	const checkpointStates = checkpointCells.map( ( cell ) => ( {
@@ -13451,9 +13465,13 @@ function completeCampaignStage() {
 			let crossedCheckpoint = false;
 			if ( checkpoint.hasPrevSample ) {
 
+				// Zero-inclusive plane test (a car landing exactly on the gate plane was
+				// invisible to the strict-inequality version) + forward-only direction,
+				// so backing across a gate can never count.
 				const z0 = checkpoint.lastLocalZ;
 				const z1 = localZ;
-				const crossedPlane = ( z0 < 0 && z1 > 0 ) || ( z0 > 0 && z1 < 0 );
+				const forwardZ = gateForwardZSign( checkpoint );
+				const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
 
 				if ( crossedPlane ) {
 
@@ -13501,7 +13519,8 @@ function completeCampaignStage() {
 
 					const z0 = checkpoint.lastLocalZ;
 					const z1 = localZ;
-					const crossedPlane = ( z0 < 0 && z1 > 0 ) || ( z0 > 0 && z1 < 0 );
+					const forwardZ = gateForwardZSign( checkpoint );
+					const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
 
 					if ( crossedPlane ) {
 
@@ -13551,7 +13570,8 @@ function completeCampaignStage() {
 
 				const z0 = lastLocalZ;
 				const z1 = localZ;
-				const crossedPlane = ( z0 < 0 && z1 > 0 ) || ( z0 > 0 && z1 < 0 );
+				const forwardZ = gateForwardZSign( finishData );
+				const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
 
 				if ( crossedPlane ) {
 
@@ -13768,7 +13788,8 @@ function completeCampaignStage() {
 
 				const z0 = lastLocalZ2;
 				const z1 = localZ;
-				const crossedPlane = ( z0 < 0 && z1 > 0 ) || ( z0 > 0 && z1 < 0 );
+				const forwardZ = gateForwardZSign( finishData );
+				const crossedPlane = ( ( z0 <= 0 && z1 >= 0 ) || ( z0 >= 0 && z1 <= 0 ) ) && ( z1 - z0 ) * forwardZ > 0;
 				if ( crossedPlane ) {
 
 					const t = z0 / ( z0 - z1 );
